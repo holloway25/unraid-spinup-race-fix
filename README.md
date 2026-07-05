@@ -11,6 +11,61 @@ kernel: sd 1:0:9:0: task abort: SUCCESS scmd(...)
 If you've seen those lines every time a sleeping disk wakes up — or worse, a burst of
 `md: diskN read error` on a drive whose SMART is pristine — this is very likely your bug.
 
+## Symptoms — is this your problem?
+
+You may see any combination of the following. All log lines below are real
+(identifying details generalised) so that searches for these exact strings
+find this page.
+
+**1. Task aborts every time a sleeping disk wakes** (the common, "benign" form
+— many systems have shown this noise for years):
+
+```
+kernel: sd 1:0:9:0: attempting task abort!scmd(0x00000000155105fb), outstanding for 15503 ms & timeout 15000 ms
+kernel: sd 1:0:9:0: [sdn] tag#2384 CDB: opcode=0x85 85 06 20 00 00 00 00 00 00 00 00 00 00 40 e5 00
+kernel: sd 1:0:9:0: task abort: SUCCESS scmd(0x00000000155105fb)
+```
+
+The giveaways: `opcode=0x85` (ATA PASS-THROUGH 16), a CDB ending `...40 e5 00`
+(CHECK POWER MODE) or `...40 e3 00` (IDLE), `timeout 15000 ms`, and
+`task abort: SUCCESS` — always coinciding with a disk spinning up. Seen with
+`mpt3sas` / LSI SAS HBAs in particular (9207, 9300, 9305, 9306 series etc.),
+with or without a SAS expander.
+
+**2. The severe form — spurious read errors on a healthy disk.** If real I/O
+(e.g. a Plex/Jellyfin stream cold-starting) is what woke the disk, the abort's
+error handling can fail that legitimate read while the drive is still spinning
+up. The drive returns sense `02/04/00` ("Not Ready — cause not reportable"),
+and Unraid's md driver logs a burst like:
+
+```
+kernel: sd 1:0:9:0: [sdn] tag#2385 FAILED Result: hostbyte=DID_OK driverbyte=DRIVER_OK
+kernel: sd 1:0:9:0: [sdn] tag#2385 Sense Key : 0x2 [current]
+kernel: sd 1:0:9:0: [sdn] tag#2385 ASC=0x4 ASCQ=0x0
+kernel: md: disk10 read error, sector=15303268032
+kernel: md: disk10 read error, sector=15303268040
+...   (often dozens in one burst)
+kernel: sd 1:0:9:0: Power-on or device reset occurred
+```
+
+Unraid reconstructs the failed blocks from parity and writes them back —
+**no data loss, and the disk is not disabled** — but the error counter on the
+Main tab climbs, and the pattern repeats on a later cold-start wake.
+
+**How to tell this apart from a genuinely failing disk:** SMART stays clean
+(zero pending/reallocated sectors, no ATA errors in the drive's own log), the
+errors *only* occur at spin-up, extended SMART tests pass, and the read errors
+arrive in one tight burst immediately after a task abort on `opcode=0x85`. A
+real failing disk shows pending sectors, errors during sustained I/O, or ATA
+errors logged by the drive itself. When in doubt, treat it as a real disk
+problem first — see the disclaimer below.
+
+**Drives commonly slow enough to lose this race** (spin-up ≥ 15 s, especially
+with low-current spin-up enabled): Seagate IronWolf ST8000VN004 and similar,
+various WD Red Plus / shucked white-label 8 TB+ units, and most high-capacity
+helium drives. Fast-spinning small drives may never trigger it — which is why
+the same system can show aborts on some disks and not others.
+
 ## Root cause
 
 When anything wakes a spun-down disk, Unraid's `emhttpd` polls drive power state via
@@ -74,17 +129,41 @@ IronWolf/WD/HC550 mix, Unraid 7.3.1):
 ## Install
 
 ```
+# 1. Get the files onto your server (any method works):
 git clone https://github.com/holloway25/unraid-spinup-race-fix.git
 cd unraid-spinup-race-fix
+
+#    ...or download the ZIP from GitHub and unpack it anywhere,
+#    e.g. under /boot/config/custom/
+
+# 2. Read install.sh before running it. It is short and commented.
+#    You are about to let a script from the internet modify a system
+#    file on your NAS as root — you should know what it does first.
+
+# 3. Run it:
 bash install.sh
 ```
 
-The installer **refuses to run** unless your live `sdspin` md5-matches a known stock
-version (see `known-stock-md5s`), so it cannot clobber something it hasn't been
-validated against. If yours isn't listed, please open an issue with your Unraid
-version and the contents of `/usr/local/sbin/sdspin`.
+**What the installer will and won't do:**
 
-Requirements: `sg_raw` (sg3_utils — present in stock Unraid) and `patch`.
+- It **verifies** your live `/usr/local/sbin/sdspin` is a known stock version (md5
+  listed in `known-stock-md5s`) before changing anything. If it doesn't recognise
+  it, it stops and changes **nothing**. If yours isn't listed, please open an issue
+  with your Unraid version and the contents of `/usr/local/sbin/sdspin`.
+- It backs up your stock script to `/boot/config/custom/sdspin.stock` before patching.
+- It adds one clearly-marked block to `/boot/config/go` so the patch survives
+  reboots. Nothing else on your flash drive is touched.
+- It does **not** spin any disk up or down, restart any service, or touch your
+  array. No reboot is needed.
+
+Requirements: `sg_raw` (sg3_utils) and `patch` — both present in stock Unraid.
+
+**Verify it worked:**
+
+```
+grep sdspin-patch /var/log/syslog            # after next boot: "patched sdspin installed"
+/usr/local/sbin/sdspin sdX status; echo $?   # against a spinning disk: expect 0
+```
 
 ### After every Unraid OS update
 
@@ -96,6 +175,31 @@ grep sdspin-patch /var/log/syslog
 * `STOCK SDSPIN CHANGED` → the update shipped a new sdspin; you are safely running
   stock. Check this repo for an updated patch, or diff the new script — if Lime Tech
   has fixed the timeout upstream, simply run `uninstall.sh` and retire this fix.
+
+## Exit codes
+
+The patched script keeps **stock sdspin's exact exit-code contract**, so emhttpd
+(and anything else calling sdspin) behaves identically:
+
+| Exit | `status` means | `up` / `down` means |
+|------|----------------|---------------------|
+| `0`  | disk is spun up | command succeeded |
+| `2`  | disk is in standby (spun down) | — |
+| `1`  | error / device doesn't support the query | command failed |
+
+Notes:
+
+- `status` exit `0` covers **all** spun-up power states, including Seagate EPC
+  idle sub-states (descriptor count `0x81`/`0x82`) that stock `hdparm -C`
+  reports as "unknown" — that was an hdparm display quirk, not an error.
+- Installer exit codes: it exits non-zero with a printed `ERROR:` line for every
+  refusal case (not root, unknown stock md5, `sg_raw` or `patch` missing, patch
+  failed to apply). Any error means **nothing was changed** unless the message
+  says otherwise.
+- Boot-guard outcomes are logged to syslog under the tag `sdspin-patch`:
+  `patched sdspin installed` (good) or `STOCK SDSPIN CHANGED or sg_raw missing -
+  patch NOT applied, running stock` (safe fallback — see "After every Unraid OS
+  update" above).
 
 ## Rollback
 
@@ -120,6 +224,30 @@ the guard block from `/boot/config/go`.)
   adds spin-*down* support for **SAS** drives; this fixes a *timeout race* for
   ATA drives. They address different branches of the same script and different
   drive classes.
+
+## Disclaimer — read before installing
+
+This project modifies a script that Unraid's disk-management daemon relies on.
+It is published in the hope it is useful, **without warranty of any kind**,
+under the terms of the GPL-2.0 license (see `LICENSE`, sections 11–12: no
+warranty, no liability).
+
+By installing it you accept that:
+
+- **You are responsible for your own server and data.** The author has
+  validated this fix on one hardware configuration (see "Validated results").
+  Your controller, drives, firmware, and Unraid version may behave differently.
+- **You should have backups and current parity before changing anything** on a
+  storage server — this or anything else.
+- **You are expected to run the verification steps yourself** after installing
+  and after every Unraid OS update. The boot guard fails safe (falls back to
+  stock), but only you can confirm it did.
+- If anything looks wrong, roll back first (`bash uninstall.sh` — instant, no
+  reboot) and ask questions second. Please open a GitHub issue with your Unraid
+  version, controller model, and the relevant syslog lines.
+- This is a community workaround for an upstream limitation, not an official
+  Lime Technology fix. If a future Unraid release resolves the underlying
+  timeout, uninstall this and use stock.
 
 ## Status
 

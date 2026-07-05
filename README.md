@@ -252,8 +252,8 @@ By installing it you accept that:
 ## Status
 
 Currently distributed as a patch + installer. A proper Unraid plugin (.plg with
-version-aware self-retirement) is planned. A bug report to Lime Technology with the
-full evidence chain is in progress — ideally this repo eventually becomes unnecessary.
+version-aware self-retirement) is planned. Ideally this repo eventually becomes
+unnecessary if the underlying timeout is addressed upstream.
 
 ## License
 

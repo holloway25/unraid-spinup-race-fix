@@ -1,0 +1,3 @@
+# Known-stock /usr/local/sbin/sdspin md5sums: "<md5> <unraid version>"
+# The installer refuses to patch an sdspin it does not recognise.
+23dd1173bb2996d629da2f2c9f2ff3e8 7.3.1

@@ -1,0 +1,62 @@
+--- a/sdspin	2026-07-05 01:30:24.489505750 +0000
++++ b/sdspin	2026-07-05 01:30:24.492851636 +0000
+@@ -1,32 +1,40 @@
+ #!/bin/bash
+-
+ # spin device up or down or get spinning status
+-# $1 device name
+-# $2 up or down or status
+-# ATA only
+-
+-# exit status:
+-# 0 for up/down: success; for status: device is spun up
+-# 1 error: probably device does not support standby
+-# 2 for status: device is spun down (standy mode)
+-# 
+-
+-# hattip to Community Dev @doron
+-
+-RDEVNAME=/dev/${1#'/dev/'}      # So that we can be called with either "sdX" or "/dev/sdX"
+-
++# $1 device name;  $2 up | down | status
++# exit: 0 up-ok/down-ok/spun-up | 1 error/unsupported | 2 standby
++#
++# PATCHED: status and up branches use sg_raw with a 45s
++# SG_IO timeout instead of hdparm (hard-coded ~15s). hdparm's timeout
++# is shorter than many NAS drives 15-19s spin-up; the resulting SCSI
++# task abort can fail a concurrent legitimate read (md read errors on
++# a healthy disk) and fires on every emhttpd-initiated spin-up.
++# https://github.com/holloway25/unraid-spinup-race-fix
++# 'down' branch unchanged from stock (@doron) - only sent to spinning
++# disks, completes in ms.
++RDEVNAME=/dev/${1#'/dev/'}
+ hdparm () {
+   OUTPUT=$(/usr/sbin/hdparm $1 $RDEVNAME 2>&1)
+   RET=$?
+   [[ $RET == 0 && ${OUTPUT,,} =~ "bad/missing sense" ]] && RET=1
+ }
+-
++sgcmd () {
++  # ATA PASS-THROUGH(16), CK_COND=1, 45s timeout; $1 = ATA command byte
++  OUTPUT=$(/usr/bin/sg_raw -v --readonly --timeout=45 "$RDEVNAME" \
++           85 06 20 00 00 00 00 00 00 00 00 00 00 40 $1 00 2>&1)
++}
+ if [[ "$2" == "up" ]]; then
+-  hdparm "-S0"
++  sgcmd e3    # IDLE, count=0 (same CDB stock hdparm -S0 sends)
++  if [[ $OUTPUT =~ status=0x ]]; then RET=0; else RET=1; fi
+ elif [[ "$2" == "down" ]]; then
+   hdparm "-y"
+ else
+-  hdparm "-C"
+-  [[ $RET == 0 && ${OUTPUT,,} =~ "standby" ]] && RET=2
++  sgcmd e5    # CHECK POWER MODE; power state in descriptor count field
++  if [[ $OUTPUT =~ count=0x([0-9a-fA-F]+) ]]; then
++    CNT=$(( 16#${BASH_REMATCH[1]} & 0xff ))
++    # 0x00/0x01 = standby; 0x40/0x41/0x80/0x81/0xFF = spun up variants
++    if (( CNT <= 1 )); then RET=2; else RET=0; fi
++  else
++    RET=1
++  fi
+ fi
+ exit $RET

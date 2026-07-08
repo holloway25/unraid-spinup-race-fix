@@ -176,6 +176,17 @@ grep sdspin-patch /var/log/syslog
   stock. Check this repo for an updated patch, or diff the new script — if Lime Tech
   has fixed the timeout upstream, simply run `uninstall.sh` and retire this fix.
 
+## Verified Unraid versions
+
+| Unraid version | Stock sdspin md5 | Status |
+| --- | --- | --- |
+| 7.3.1 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Developed and validated on this version (4 Jul 2026) |
+| 7.3.2 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Stock sdspin byte-identical to 7.3.1; patch verified re-applying cleanly after upgrade (9 Jul 2026) |
+
+Versions listed here have their stock md5 in `known-stock-md5s`, so the installer
+accepts them. On any version *not* listed, the installer (and the boot guard)
+refuse to patch and the system runs stock — see "After every Unraid OS update".
+
 ## Exit codes
 
 The patched script keeps **stock sdspin's exact exit-code contract**, so emhttpd

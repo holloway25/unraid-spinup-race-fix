@@ -116,7 +116,7 @@ breaks), and it logs a warning so you know to check this repo for an updated pat
 ### Validated results
 
 On the system this was developed on (21-drive array, LSI SAS3224 direct-attach,
-IronWolf/WD/HC550 mix, Unraid 7.3.1):
+IronWolf/WD/HC550 mix, Unraid 7.3.1; re-verified on 7.3.2, which ships a byte-identical stock sdspin):
 
 * Race reproduction test (spin-up + concurrent status poll): stock aborted at exactly
   15000 ms; patched waited out a kernel-timestamped **18 s** spin-up and returned

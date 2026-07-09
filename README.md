@@ -187,6 +187,36 @@ Versions listed here have their stock md5 in `known-stock-md5s`, so the installe
 accepts them. On any version *not* listed, the installer (and the boot guard)
 refuse to patch and the system runs stock — see "After every Unraid OS update".
 
+## Optional: boot notification (User Scripts)
+
+The boot guard only writes its verdict to syslog. `extras/sdspin-patch-notify.sh`
+turns that into an Unraid notification after every boot, so a failed re-apply
+after an OS update cannot slip past unnoticed. Every boot produces exactly one
+notification:
+
+| Boot outcome | Notification |
+| --- | --- |
+| Guard applied the patch and the live sdspin md5 matches `sdspin.patched` | normal — "sdspin patch active" |
+| Guard logged `STOCK SDSPIN CHANGED` (update shipped a new sdspin; running stock) | **alert** — "SDSPIN PATCH NOT APPLIED" |
+| No guard line in syslog, or live md5 unexpected (guard block missing/damaged) | **warning** — "sdspin guard did not run" |
+
+The expected md5 is read from `/boot/config/custom/sdspin.patched` at runtime,
+so the script needs no editing when the patch is ported to a new stock sdspin.
+
+Setup, using the User Scripts plugin (Community Applications):
+
+1. Install the **User Scripts** plugin if you don't have it.
+2. *Settings → User Scripts → Add New Script*, name it `sdspin-patch-notify`.
+3. Edit the script and paste the contents of `extras/sdspin-patch-notify.sh`
+   (or copy the file over the created
+   `/boot/config/plugins/user.scripts/scripts/sdspin-patch-notify/script`).
+4. Set the schedule to **At First Array Start Only**.
+
+Whether the "normal" success notification also emails/pushes depends on your
+notification agent settings (*Settings → Notification Settings*); by default it
+appears in the webGUI only, while the alert/warning levels typically go to all
+agents — quiet green ticks, loud red flags.
+
 ## Exit codes
 
 The patched script keeps **stock sdspin's exact exit-code contract**, so emhttpd

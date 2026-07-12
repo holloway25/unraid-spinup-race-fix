@@ -66,6 +66,44 @@ various WD Red Plus / shucked white-label 8 TB+ units, and most high-capacity
 helium drives. Fast-spinning small drives may never trigger it — which is why
 the same system can show aborts on some disks and not others.
 
+## What this does NOT fix
+
+This patch fixes only the sdspin power-management **timeout race**. If your
+symptom is something else, this patch won't help — treat it as a disk / media /
+transport problem first. In particular, it does **not** fix:
+
+- Uncorrectable read errors (**UNC**)
+- Critical medium errors
+- SMART **pending** or **reallocated** sector growth
+- SATA **CRC** / link errors (usually cabling, backplane, or power)
+- Controller / backplane resets, or a drive dropping off the bus
+
+The fastest way to tell which you have is to look at what surrounds the errors
+in syslog.
+
+**This patch's race** — the errors cluster around a disk *spinning up*, and you
+see lines like:
+
+```
+attempting task abort ... timeout 15000 ms
+CDB: opcode=0x85 ... 40 e5 00   (CHECK POWER MODE)   or   ... 40 e3 00   (IDLE)
+Sense Key 0x2 / ASC 0x4 / ASCQ 0x0   (02/04/00 "Not Ready")
+```
+
+**Out of scope — a genuine disk / media / transport fault** — *not* this patch,
+if you instead see lines like:
+
+```
+READ FPDMA QUEUED ... error: { UNC }
+critical medium error, dev sdX, sector N
+link is slow / SATA link down / hard resetting link
+```
+
+When both patterns appear, or SMART shows pending / reallocated sectors, assume
+a real disk fault first: the sdspin race leaves **no** SMART evidence and only
+ever fires at spin-up. Please read the disclaimer at the bottom before
+installing anything.
+
 ## Root cause
 
 When anything wakes a spun-down disk, Unraid's `emhttpd` polls drive power state via

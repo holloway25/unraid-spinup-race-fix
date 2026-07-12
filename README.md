@@ -165,6 +165,8 @@ grep sdspin-patch /var/log/syslog            # after next boot: "patched sdspin 
 /usr/local/sbin/sdspin sdX status; echo $?   # against a spinning disk: expect 0
 ```
 
+The installer also prints a one-line smoke test against one of your array disks (selected from `disks.ini`, never the USB flash); expect `exit 0` or `exit 2`.
+
 ### After every Unraid OS update
 
 ```

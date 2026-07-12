@@ -77,10 +77,26 @@ GUARD
 cp -f "$TMP" "$GO"; rm -f "$TMP"
 echo "Boot guard installed in $GO"
 
-# Smoke test against the first array device present
-DEV=$(ls /dev/sd? 2>/dev/null | head -1)
+# Smoke test against a real array/pool disk - never the USB boot flash or
+# an unassigned USB disk (issue #2: "ls /dev/sd? | head -1" picked /dev/sda,
+# which is the flash stick on USB-boot systems, giving a meaningless exit 1).
+#
+# Primary source: emhttpd's disks.ini - the exact device map sdspin is called
+# on. Skip the [flash] section; take the first sdX member. Fall back to "first
+# non-USB rotational disk" via lsblk if disks.ini is unavailable.
+DEV=$(awk -F'"' '/^\[/{sec=$2}
+     /^device=/ && sec!="flash" && $2 ~ /^sd[a-z]+$/ {print $2; exit}' \
+     /var/local/emhttp/disks.ini 2>/dev/null)
+if [[ -z ${DEV:-} ]]; then
+  echo "NOTICE: could not read an array disk from /var/local/emhttp/disks.ini - falling back to lsblk (first non-USB rotational disk)."
+  DEV=$(lsblk -dno NAME,TRAN,ROTA 2>/dev/null | awk '$2!="usb" && $3==1 {print $1; exit}')
+fi
+
 if [[ -n ${DEV:-} ]]; then
-  set +e; "$SDSPIN" "$DEV" status; RC=$?; set -e
-  echo "Smoke test: sdspin ${DEV#/dev/} status -> exit $RC (0=spun up, 2=standby, 1=unsupported)"
+  set +e; "$SDSPIN" "/dev/$DEV" status; RC=$?; set -e
+  echo "Smoke test: sdspin $DEV status -> exit $RC (0=spun up, 2=standby, 1=unsupported)"
+  [[ $RC -eq 1 ]] && echo "WARNING: exit 1 (unsupported) on array disk $DEV is unexpected - please open an issue."
+else
+  echo "Smoke test skipped: no array/pool sdX disk found (only flash/USB present?)."
 fi
 echo "Done. After every Unraid update: grep sdspin-patch /var/log/syslog"

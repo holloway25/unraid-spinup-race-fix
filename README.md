@@ -48,9 +48,11 @@ kernel: md: disk10 read error, sector=15303268040
 kernel: sd 1:0:9:0: Power-on or device reset occurred
 ```
 
-Unraid reconstructs the failed blocks from parity and writes them back —
-**no data loss, and the disk is not disabled** — but the error counter on the
-Main tab climbs, and the pattern repeats on a later cold-start wake.
+On the validated system, Unraid reconstructed the failed blocks from parity and
+wrote them back; no data loss or disabled disk was observed, but the error counter
+on the Main tab climbed and the pattern repeated on later cold-start wakes.
+This is **not a recovery guarantee**: reconstruction depends on usable parity and
+the other required drives, and a failed recovery write can disable a disk.
 
 **How to tell this apart from a genuinely failing disk:** SMART stays clean
 (zero pending/reallocated sectors, no ATA errors in the drive's own log), the
@@ -114,9 +116,12 @@ Many common NAS drives take **15–19 seconds** to spin up (low-current spin-up 
 slower still). When the poll lands while the drive is spinning up, the timeout expires
 first, the SCSI layer fires a **task abort**, and in the worst case the abort's error
 handling fails a *legitimate in-flight read* with sense `02/04/00` ("not ready") —
-producing a burst of `md read error` lines on a perfectly healthy disk. Unraid
-reconstructs the blocks from parity and carries on (no data loss, disk not disabled),
-but the race re-opens on every cold-start wake.
+producing a burst of `md read error` lines on a healthy disk. On the validated
+system, parity reconstruction succeeded and operation continued without observed
+data loss or a disabled disk; the race re-opened on later cold-start wakes.
+Other systems can suffer failed recovery or a disabled disk: usable parity and
+the other required drives are essential. See
+[Unraid's recovery guidance](https://docs.unraid.net/unraid-os/troubleshooting/diagnostics/udma-crc-errors/).
 
 The same 15s limit also hits the spin-**up** command (`hdparm -S0` / ATA IDLE) on every
 emhttpd-initiated spin-up — that is the source of the long-standing "benign task abort
@@ -141,6 +146,10 @@ A small patch to `sdspin`:
   descriptor; exit codes are identical to stock, so emhttpd semantics are unchanged.
   `--readonly` matters: a read-write open emits a udev change event on close, which
   triggers a partition rescan that *wakes the disk being polled*.
+  Command results are checked before using the returned registers: only a clean
+  sg_raw exit or its informational CK_COND response is accepted, with a zero ATA
+  error register and no ERR, DF, BSY or DRQ status bits. A failed command is never
+  interpreted as successful spin-up or standby just because a descriptor exists.
 * **up** branch: `hdparm -S0` → `sg_raw` ATA IDLE at 45s — same wake command, but it
   can no longer time out mid-spin-up.
 * **down** branch: unchanged stock. It's only ever sent to spinning disks and
@@ -197,10 +206,20 @@ bash install.sh
   files and a lock against simultaneous install/uninstall runs, and attempts to
   restore the prior files if an installation write fails. If restoration itself
   fails (for example, an unwritable filesystem), it prints an explicit error.
+- Every installation rebuilds the patched script from recognised stock and the
+  **current repository diff**, including reinstallation over an older saved patch.
+  Invalid updated diffs fail before any installation files are changed.
+- Interactive installation, uninstallation and failure recovery use verified
+  same-directory temporary files followed by atomic rename, rather than copying
+  over the live script in place. Atomicity is per file, not a multi-file transaction
+  or a guarantee of recovery after power loss/SIGKILL.
 - The boot guard checks both the stock and patched hashes, prepares a verified
   replacement alongside the live file, and uses an atomic rename. It only logs
   success after the live hash is verified. A missing dependency, invalid patch
   file or failed install is logged separately.
+- The generated guard is placed immediately after the `#!/bin/bash` header,
+  before existing startup commands, service startup and any trailing `exit`.
+  Other shebang/layouts are refused rather than guessing where to insert it.
 - An older manually written guard outside the repository's BEGIN/END markers is
   not silently replaced. If the remaining go file references
   `/boot/config/custom/sdspin.patched`, installation/uninstallation refuses so
@@ -332,12 +351,24 @@ Do not blindly copy an old `sdspin.stock` over a newer live script.
 
 ## Development tests
 
-Run `bash tests/run.sh` on Linux with Bash, coreutils, util-linux (`flock`) and
+Run `bash tests/run.sh` and `bash tests/mutations.sh` on Linux with Bash,
+coreutils, util-linux (`flock`) and
 `patch`. Tests use a marked private `/tmp` sandbox and mock disk commands; they
 never contact a live server or spin a disk up/down. Coverage includes install,
 repeat install, rollback on failed writes, boot-guard verification/failure,
 changed upstream stock, normal uninstall, missing backups and malformed guard
-markers. GitHub Actions runs the same tests.
+markers. Regression coverage also includes 40 mocked ATA completion cases,
+updated/invalid patch reinstallation and startup files with early exits. The
+mutation tests deliberately remove the uninstall guard update and bypass ATA
+completion validation, verifying that the suite fails in both cases. GitHub
+Actions runs both test scripts. These tests are not a
+substitute for hardware validation; the revised ATA parsing has not been tested
+on the production server.
+
+The accepted sg_raw exit categories are documented in upstream
+[sg_lib.h](https://github.com/hreinecke/sg3_utils/blob/master/include/sg_lib.h)
+and the CK_COND descriptor behaviour in
+[sg_sat_read_gplog(8)](https://github.com/hreinecke/sg3_utils/blob/master/doc/sg_sat_read_gplog.8).
 
 ## Scope & limitations
 

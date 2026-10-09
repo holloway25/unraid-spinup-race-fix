@@ -1,6 +1,6 @@
 --- a/sdspin
 +++ b/sdspin
-@@ -1,32 +1,40 @@
+@@ -1,32 +1,56 @@
  #!/bin/bash
 -
  # spin device up or down or get spinning status
@@ -40,18 +40,34 @@
 +  # ATA PASS-THROUGH(16), CK_COND=1, 45s timeout; $1 = ATA command byte
 +  OUTPUT=$(/usr/bin/sg_raw -v --readonly --timeout=45 "$RDEVNAME" \
 +           85 06 20 00 00 00 00 00 00 00 00 00 00 40 $1 00 2>&1)
++  SG_RC=$?
++}
++ata_ok () {
++  # sg_raw reports successful CK_COND as NO_SENSE(20) or RECOVERED(21).
++  # Other exit codes are command/transport failures, even with a descriptor.
++  case $SG_RC in
++    0) ;;
++    20|21) [[ ${OUTPUT,,} == *"ata pass through information available"* ]] || return 1 ;;
++    *) return 1 ;;
++  esac
++  [[ $OUTPUT =~ error=0x([0-9a-fA-F]{1,2})([^0-9a-fA-F]|$) ]] || return 1
++  ATA_ERROR=$((16#${BASH_REMATCH[1]}))
++  [[ $OUTPUT =~ status=0x([0-9a-fA-F]{1,2})([^0-9a-fA-F]|$) ]] || return 1
++  ATA_STATUS=$((16#${BASH_REMATCH[1]}))
++  # Reject ERR, DF, BSY and DRQ: no completed successful ATA command.
++  (( ATA_ERROR == 0 && (ATA_STATUS & 0xa9) == 0 ))
 +}
  if [[ "$2" == "up" ]]; then
 -  hdparm "-S0"
 +  sgcmd e3    # IDLE, count=0 (same CDB stock hdparm -S0 sends)
-+  if [[ $OUTPUT =~ status=0x ]]; then RET=0; else RET=1; fi
++  if ata_ok; then RET=0; else RET=1; fi
  elif [[ "$2" == "down" ]]; then
    hdparm "-y"
  else
 -  hdparm "-C"
 -  [[ $RET == 0 && ${OUTPUT,,} =~ "standby" ]] && RET=2
 +  sgcmd e5    # CHECK POWER MODE; power state in descriptor count field
-+  if [[ $OUTPUT =~ count=0x([0-9a-fA-F]+) ]]; then
++  if ata_ok && [[ $OUTPUT =~ count=0x([0-9a-fA-F]{1,4})([^0-9a-fA-F]|$) ]]; then
 +    CNT=$(( 16#${BASH_REMATCH[1]} & 0xff ))
 +    # 0x00/0x01 = standby; 0x40/0x41/0x80/0x81/0xFF = spun up variants
 +    if (( CNT <= 1 )); then RET=2; else RET=0; fi

@@ -30,13 +30,26 @@ strip_guard() {
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/sdspin-work.XXXXXXXX")
 COMMITTED=0
 declare -a TARGETS=() BACKUPS=() EXISTED=()
+# Prepare and verify alongside the destination, then publish with atomic rename.
+# Explicit failure handling also applies when called from rollback conditionals.
+atomic_replace() {
+  local source=$1 target=$2 mode=$3 staged expected
+  staged=$(mktemp "${target%/*}/.${target##*/}.replace.XXXXXXXX") || return 1
+  if ! expected=$(hash_file "$source") ||
+     ! install -m "$mode" "$source" "$staged" ||
+     [[ $(hash_file "$staged") != "$expected" ]] ||
+     ! mv -f -- "$staged" "$target"; then
+    rm -f -- "$staged"
+    return 1
+  fi
+}
 cleanup() {
   local rc=$? i
   trap - EXIT HUP INT TERM
   if (( ! COMMITTED )); then
     for ((i=${#TARGETS[@]}-1; i>=0; i--)); do
       if [[ ${EXISTED[i]} == 1 ]]; then
-        cp -p -- "${BACKUPS[i]}" "${TARGETS[i]}" || echo "ERROR: rollback failed for ${TARGETS[i]}" >&2
+        atomic_replace "${BACKUPS[i]}" "${TARGETS[i]}" "$(stat -c %a "${BACKUPS[i]}")" || echo "ERROR: rollback failed for ${TARGETS[i]}" >&2
       else
         rm -f -- "${TARGETS[i]}" || echo "ERROR: rollback failed for ${TARGETS[i]}" >&2
       fi

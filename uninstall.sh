@@ -23,10 +23,10 @@ fi
 save_target "$GO"
 if (( RESTORE )); then
   save_target "$SDSPIN"
-  install -m 0755 "$CUSTOM/sdspin.stock" "$SDSPIN"
+  atomic_replace "$CUSTOM/sdspin.stock" "$SDSPIN" 0755
   [[ $(hash_file "$SDSPIN") == "$STOCK_MD5" ]] || die "stock restore verification failed"
 fi
-cp "$WORK/go" "$GO"
+atomic_replace "$WORK/go" "$GO" "$(stat -c %a "$GO")"
 COMMITTED=1
 if (( RESTORE )); then
   echo "Saved stock sdspin restored and verified; boot guard removed."

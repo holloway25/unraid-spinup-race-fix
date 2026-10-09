@@ -16,22 +16,24 @@ CUR_MD5=$(hash_file "$SDSPIN")
 if [[ -f $CUSTOM/sdspin.patched && $CUR_MD5 == $(hash_file "$CUSTOM/sdspin.patched") ]]; then
   [[ -f $CUSTOM/sdspin.stock ]] || die "already patched but stock backup missing"
   cp "$CUSTOM/sdspin.stock" "$WORK/stock"
-  cp "$CUSTOM/sdspin.patched" "$WORK/patched"
 else
   grep -q "^$CUR_MD5 " "$MD5S" || die "live sdspin hash ($CUR_MD5) is not a known stock version; nothing changed"
   cp "$SDSPIN" "$WORK/stock"
-  cp "$WORK/stock" "$WORK/patched"
-  patch --batch --forward -s "$WORK/patched" "$PATCH" || die "patch failed to apply; nothing changed"
 fi
 STOCK_MD5=$(hash_file "$WORK/stock")
 grep -q "^$STOCK_MD5 " "$MD5S" || die "stock backup is not recognised"
 bash -n "$WORK/stock"
+cp "$WORK/stock" "$WORK/patched"
+patch --batch --forward -s "$WORK/patched" "$PATCH" || die "patch failed to apply; nothing changed"
 bash -n "$WORK/patched"
 PATCHED_MD5=$(hash_file "$WORK/patched")
-strip_guard > "$WORK/go" || die "malformed or duplicate guard markers; nothing changed"
-if grep -qF '/boot/config/custom/sdspin.patched' "$WORK/go"; then
+strip_guard > "$WORK/go.body" || die "malformed or duplicate guard markers; nothing changed"
+if grep -qF '/boot/config/custom/sdspin.patched' "$WORK/go.body"; then
   die "unmanaged/legacy sdspin guard found in go; review it before installing; nothing changed"
 fi
+[[ $(head -n 1 "$WORK/go.body") == '#!/bin/bash' ]] || die "unsupported go layout: expected #!/bin/bash on first line; nothing changed"
+# Execute before any user commands, early exits or service startup.
+head -n 1 "$WORK/go.body" > "$WORK/go"
 cat >> "$WORK/go" <<GUARD
 $MARK_BEGIN
 # Only replace recognised stock with the verified patched file.
@@ -56,16 +58,17 @@ else
 fi
 $MARK_END
 GUARD
+tail -n +2 "$WORK/go.body" >> "$WORK/go"
 bash -n "$WORK/go"
 [[ $(hash_file "$SDSPIN") == "$CUR_MD5" ]] || die "live script changed during preparation"
 mkdir -p "$CUSTOM"
 for target in "$CUSTOM/sdspin.stock" "$CUSTOM/sdspin.patched" "$GO" "$SDSPIN"; do
   save_target "$target"
 done
-install -m 0755 "$WORK/stock" "$CUSTOM/sdspin.stock"
-install -m 0755 "$WORK/patched" "$CUSTOM/sdspin.patched"
-cp "$WORK/go" "$GO"
-install -m 0755 "$WORK/patched" "$SDSPIN"
+atomic_replace "$WORK/stock" "$CUSTOM/sdspin.stock" 0755
+atomic_replace "$WORK/patched" "$CUSTOM/sdspin.patched" 0755
+atomic_replace "$WORK/go" "$GO" "$(stat -c %a "$GO")"
+atomic_replace "$WORK/patched" "$SDSPIN" 0755
 [[ $(hash_file "$SDSPIN") == "$PATCHED_MD5" ]] || die "live verification failed"
 COMMITTED=1
 echo "Patch and boot guard installed; live hash verified."

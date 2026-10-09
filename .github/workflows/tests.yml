@@ -1,0 +1,15 @@
+name: Sandbox tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and sandbox tests
+        run: |
+          for script in install.sh uninstall.sh lib/common.sh extras/sdspin-patch-notify.sh tests/run.sh; do
+            bash -n "$script"
+          done
+          bash tests/run.sh

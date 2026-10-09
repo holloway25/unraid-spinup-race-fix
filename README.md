@@ -191,11 +191,26 @@ bash install.sh
   with your Unraid version and the contents of `/usr/local/sbin/sdspin`.
 - It backs up your stock script to `/boot/config/custom/sdspin.stock` before patching.
 - It adds one clearly-marked block to `/boot/config/go` so the patch survives
-  reboots. Nothing else on your flash drive is touched.
+  reboots. The installer needs `lib/common.sh`, so copy or unpack the **whole
+  repository**, not just the top-level scripts.
+- It stages and syntax-checks files before installation, uses private temporary
+  files and a lock against simultaneous install/uninstall runs, and attempts to
+  restore the prior files if an installation write fails. If restoration itself
+  fails (for example, an unwritable filesystem), it prints an explicit error.
+- The boot guard checks both the stock and patched hashes, prepares a verified
+  replacement alongside the live file, and uses an atomic rename. It only logs
+  success after the live hash is verified. A missing dependency, invalid patch
+  file or failed install is logged separately.
+- An older manually written guard outside the repository's BEGIN/END markers is
+  not silently replaced. If the remaining go file references
+  `/boot/config/custom/sdspin.patched`, installation/uninstallation refuses so
+  that the legacy block can be reviewed explicitly instead of leaving duplicate
+  guards or claiming to have removed a guard it does not own.
 - It does **not** spin any disk up or down, restart any service, or touch your
   array. No reboot is needed.
 
-Requirements: `sg_raw` (sg3_utils) and `patch` — both present in stock Unraid.
+Requirements: Bash, coreutils, `flock` (util-linux), `sg_raw` (sg3_utils) and
+`patch` — present in stock Unraid.
 
 **Verify it worked:**
 
@@ -213,9 +228,13 @@ grep sdspin-patch /var/log/syslog
 ```
 
 * `patched sdspin installed` → all good.
-* `STOCK SDSPIN CHANGED` → the update shipped a new sdspin; you are safely running
-  stock. Check this repo for an updated patch, or diff the new script — if Lime Tech
-  has fixed the timeout upstream, simply run `uninstall.sh` and retire this fix.
+* `STOCK SDSPIN CHANGED` → the live script has an unrecognised hash; the guard left
+  it unchanged. After a normal OS upgrade this is usually new stock. Check this
+  repo for an updated patch, or diff the script — if Lime Tech has fixed the
+  timeout upstream, run `uninstall.sh` and retire this fix.
+* `SG_RAW MISSING`, `PATCH FILE INVALID` or `PATCH INSTALL FAILED` → the fix is not
+  confirmed active. Inspect the dependency/files and the live script; do not rely
+  on an earlier success message. The optional notification script raises an alert.
 
 ## Verified Unraid versions
 
@@ -249,6 +268,7 @@ notification:
 | --- | --- |
 | Guard applied the patch and the live sdspin md5 matches `sdspin.patched` | normal — "sdspin patch active" |
 | Guard logged `STOCK SDSPIN CHANGED` (update shipped a new sdspin; running stock) | **alert** — "SDSPIN PATCH NOT APPLIED" |
+| Guard reports missing sg_raw, invalid patch file or failed installation | **alert** — "SDSPIN PATCH NOT APPLIED" |
 | No guard line in syslog, or live md5 unexpected (guard block missing/damaged) | **warning** — "sdspin guard did not run" |
 
 The expected md5 is read from `/boot/config/custom/sdspin.patched` at runtime,
@@ -289,9 +309,9 @@ Notes:
   failed to apply). Any error means **nothing was changed** unless the message
   says otherwise.
 - Boot-guard outcomes are logged to syslog under the tag `sdspin-patch`:
-  `patched sdspin installed` (good) or `STOCK SDSPIN CHANGED or sg_raw missing -
-  patch NOT applied, running stock` (safe fallback — see "After every Unraid OS
-  update" above).
+  `patched sdspin installed` (verified success), `STOCK SDSPIN CHANGED`,
+  `SG_RAW MISSING`, `PATCH FILE INVALID` or `PATCH INSTALL FAILED` — see
+  "After every Unraid OS update" above.
 
 ## Rollback
 
@@ -301,8 +321,23 @@ Instant, no reboot:
 bash uninstall.sh
 ```
 
-(or manually: `cp /boot/config/custom/sdspin.stock /usr/local/sbin/sdspin` and remove
-the guard block from `/boot/config/go`.)
+The uninstaller restores the recognised stock backup **only if the live script
+matches the saved patched copy**. If the live script differs (for example, newer
+upstream stock after an OS upgrade), it leaves that script untouched and removes
+the guard. A missing or unrecognised backup while the saved patch is live causes
+a refusal with no changes. Saved stock/patch files are retained, and the optional
+User Scripts notification must be removed separately when retiring the fix.
+
+Do not blindly copy an old `sdspin.stock` over a newer live script.
+
+## Development tests
+
+Run `bash tests/run.sh` on Linux with Bash, coreutils, util-linux (`flock`) and
+`patch`. Tests use a marked private `/tmp` sandbox and mock disk commands; they
+never contact a live server or spin a disk up/down. Coverage includes install,
+repeat install, rollback on failed writes, boot-guard verification/failure,
+changed upstream stock, normal uninstall, missing backups and malformed guard
+markers. GitHub Actions runs the same tests.
 
 ## Scope & limitations
 
@@ -321,7 +356,7 @@ the guard block from `/boot/config/go`.)
 
 This project modifies a script that Unraid's disk-management daemon relies on.
 It is published in the hope it is useful, **without warranty of any kind**,
-under the terms of the GPL-2.0 license (see `LICENSE`, sections 11–12: no
+under the terms of the GPL-3.0-only license (see `LICENSE`, sections 15–16: no
 warranty, no liability).
 
 By installing it you accept that:
@@ -349,9 +384,11 @@ unnecessary if the underlying timeout is addressed upstream.
 
 ## License
 
-GPL-2.0. The patch modifies Unraid's `sdspin` script (credit: Lime Technology /
-community dev @doron); this repo distributes only the diff and installer, not the
-original script.
+GPL-3.0-only for this project's original code and patch contributions. The patch
+modifies Unraid's `sdspin` script (credit: Lime Technology / community dev @doron);
+this repo distributes the diff, not a standalone copy of the original script.
+Third-party code and upstream Unraid files retain their own licensing; this
+licence change does not relicense them.
 
 *Provided with no warranty. It works on my hardware; validate on yours (the README's
 validation section doubles as a test plan). Use at your own risk.*

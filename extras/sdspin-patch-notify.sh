@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-only
 # sdspin-patch-notify - verify the sdspin patch is active after boot and raise
 # an Unraid notification with the result (success, failure, or guard missing).
 #
@@ -31,10 +32,10 @@ if echo "$LINE" | grep -q 'patched sdspin installed' && [ "$LIVE" = "$EXPECT" ];
   logger -t "$TAG" "OK: guard applied patch, live md5 verified ($LIVE)"
   "$NOTIFY" -e "sdspin patch" -s "sdspin patch active" \
     -d "Boot guard applied the patch; live md5 verified ($LIVE)" -i "normal"
-elif echo "$LINE" | grep -q 'STOCK SDSPIN CHANGED'; then
-  logger -t "$TAG" "ALERT: guard refused - stock sdspin changed"
+elif echo "$LINE" | grep -qE 'STOCK SDSPIN CHANGED|SG_RAW MISSING|PATCH FILE INVALID|PATCH INSTALL FAILED'; then
+  logger -t "$TAG" "ALERT: guard did not apply the patch: $LINE"
   "$NOTIFY" -e "sdspin patch" -s "SDSPIN PATCH NOT APPLIED" \
-    -d "This Unraid update shipped a different sdspin - you are running STOCK (spin-up task aborts may return; nothing is broken). Follow 'After every Unraid OS update' in the repo README." -i "alert"
+    -d "Boot guard reported: $LINE. Do not assume the patch is active. Follow 'After every Unraid OS update' in the repo README." -i "alert"
 else
   logger -t "$TAG" "WARNING: no guard line this boot or md5 mismatch (live: ${LIVE:-none}, expected: $EXPECT)"
   "$NOTIFY" -e "sdspin patch" -s "sdspin guard did not run" \

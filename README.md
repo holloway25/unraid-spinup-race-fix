@@ -154,7 +154,8 @@ breaks), and it logs a warning so you know to check this repo for an updated pat
 ### Validated results
 
 On the system this was developed on (21-drive array, LSI SAS3224 direct-attach,
-IronWolf/WD/HC550 mix, Unraid 7.3.1; re-verified on 7.3.2, which ships a byte-identical stock sdspin):
+IronWolf/WD/HC550 mix, Unraid 7.3.1; post-upgrade compatibility re-verified on
+7.3.2 and 7.3.3, which ship a byte-identical stock sdspin):
 
 * Race reproduction test (spin-up + concurrent status poll): stock aborted at exactly
   15000 ms; patched waited out a kernel-timestamped **18 s** spin-up and returned
@@ -222,10 +223,20 @@ grep sdspin-patch /var/log/syslog
 | --- | --- | --- |
 | 7.3.1 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Developed and validated on this version (4 Jul 2026) |
 | 7.3.2 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Stock sdspin byte-identical to 7.3.1; patch verified re-applying cleanly after upgrade (9 Jul 2026) |
+| 7.3.3 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Unchanged stock sdspin; boot guard and live patched script verified after upgrade, kernel 6.18.54-Unraid (9 Oct 2026) |
+
+The 7.3.3 check confirmed that the boot guard recognised the stock hash before
+installing the patch, the live script matched the saved patched copy, and the
+post-upgrade startup log contained no task-abort or md read-error events at the
+time of review. No forced spin-up/spin-down race reproduction was performed;
+this is a compatibility check, not a new full regression test.
 
 Versions listed here have their stock md5 in `known-stock-md5s`, so the installer
-accepts them. On any version *not* listed, the installer (and the boot guard)
-refuse to patch and the system runs stock — see "After every Unraid OS update".
+accepts them. Acceptance is based on the **script hash**, not the OS version
+number: an unlisted release with identical stock sdspin can also be accepted.
+The boot guard checks against the stock hash saved at installation. If the stock
+script changes, it refuses to patch and the system runs stock — see "After every
+Unraid OS update".
 
 ## Optional: boot notification (User Scripts)
 

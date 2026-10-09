@@ -155,10 +155,14 @@ A small patch to `sdspin`:
 * **down** branch: unchanged stock. It's only ever sent to spinning disks and
   completes in milliseconds.
 
-A boot guard in `/boot/config/go` re-applies the patch each boot (the live copy lives
-in a ramdisk and is rebuilt stock at boot). If an Unraid update ships a **different**
-sdspin, the guard refuses, the system runs stock (the old log noise returns but nothing
-breaks), and it logs a warning so you know to check this repo for an updated patch.
+A boot guard in `/boot/config/go` installs the prepared `sdspin.patched` copy each
+boot (the live copy lives in a ramdisk and is rebuilt stock at boot). The installer
+applies the repository diff to recognised stock; the boot guard does not run the
+diff again. Keep `sdspin.patched` for boot installation and `sdspin.stock` for
+recognised-stock reinstallation and safe uninstall. If an Unraid update ships a **different**
+sdspin, the guard leaves it untouched and logs a warning so you know to review the
+new script. The fix is then inactive; if stock still has the timeout race, its
+task-abort and possible read-error symptoms may return.
 
 ### Validated results
 
@@ -274,7 +278,9 @@ accepts them. Acceptance is based on the **script hash**, not the OS version
 number: an unlisted release with identical stock sdspin can also be accepted.
 The boot guard checks against the stock hash saved at installation. If the stock
 script changes, it refuses to patch and the system runs stock — see "After every
-Unraid OS update".
+Unraid OS update". A future release such as 7.4 is not presumed compatible: review
+its stock script, adapt and test the diff if needed, and add its recognised hash
+before installing. Adding a checksum alone does not validate an updated script.
 
 ## Optional: boot notification (User Scripts)
 
@@ -365,8 +371,15 @@ mutation tests deliberately remove the uninstall guard update and bypass ATA
 completion validation, verifying that the suite fails in both cases. GitHub
 Actions runs all three test scripts, including notification checksum failures
 and empty/malformed checksum output. These tests are not a
-substitute for hardware validation; the revised ATA parsing has not been tested
-on the production server.
+substitute for hardware validation. On 9 Oct 2026, revision `cd7a123` was installed
+on the production server running Unraid 7.3.3. Read-only status checks returned
+exit 0 on two already-spinning parity drives and exit 2 on a drive already in
+standby. A successful informational CK_COND response had sg_raw exit 21, ATA
+error 0x00, status 0x50 and count 0xff. The live and prepared patched copies both
+had md5 `48bf4ed8aa9b567f1566b21c74c97556`. These checks validate those status
+responses only; boot verification of this revised guard and spin-up/race
+validation remain outstanding. No disk state changes or reboot were performed
+as part of these validation checks.
 
 The accepted sg_raw exit categories are documented in upstream
 [sg_lib.h](https://github.com/hreinecke/sg3_utils/blob/master/include/sg_lib.h)

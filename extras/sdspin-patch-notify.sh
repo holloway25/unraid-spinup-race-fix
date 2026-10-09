@@ -24,8 +24,21 @@ if [ ! -f "$PATCHED_FILE" ]; then
   exit 0
 fi
 
-EXPECT=$(md5sum "$PATCHED_FILE" | cut -d' ' -f1)
-LIVE=$(md5sum /usr/local/sbin/sdspin 2>/dev/null | cut -d' ' -f1)
+verification_failed() {
+  logger -t "$TAG" "WARNING: unable to read valid checksum inputs; patch activity unverified"
+  "$NOTIFY" -e "sdspin patch" -s "sdspin verification failed" \
+    -d "Unable to read valid checksum inputs. Patch activity has not been verified." -i "warning"
+  exit 1
+}
+if ! EXPECT=$(md5sum "$PATCHED_FILE" 2>/dev/null) ||
+   ! LIVE=$(md5sum /usr/local/sbin/sdspin 2>/dev/null); then
+  verification_failed
+fi
+EXPECT=${EXPECT%% *}
+LIVE=${LIVE%% *}
+if [[ ! $EXPECT =~ ^[0-9a-f]{32}$ || ! $LIVE =~ ^[0-9a-f]{32}$ ]]; then
+  verification_failed
+fi
 LINE=$(grep 'sdspin-patch:' /var/log/syslog | tail -1)
 
 if echo "$LINE" | grep -q 'patched sdspin installed' && [ "$LIVE" = "$EXPECT" ]; then

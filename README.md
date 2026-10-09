@@ -289,6 +289,7 @@ notification:
 | Guard logged `STOCK SDSPIN CHANGED` (update shipped a new sdspin; running stock) | **alert** — "SDSPIN PATCH NOT APPLIED" |
 | Guard reports missing sg_raw, invalid patch file or failed installation | **alert** — "SDSPIN PATCH NOT APPLIED" |
 | No guard line in syslog, or live md5 unexpected (guard block missing/damaged) | **warning** — "sdspin guard did not run" |
+| Checksum read fails or returns an empty/malformed checksum | **warning** — "sdspin verification failed" (non-zero script exit) |
 
 The expected md5 is read from `/boot/config/custom/sdspin.patched` at runtime,
 so the script needs no editing when the patch is ported to a new stock sdspin.
@@ -351,7 +352,8 @@ Do not blindly copy an old `sdspin.stock` over a newer live script.
 
 ## Development tests
 
-Run `bash tests/run.sh` and `bash tests/mutations.sh` on Linux with Bash,
+Run `bash tests/run.sh`, `bash tests/mutations.sh` and `bash tests/notify.sh`
+on Linux with Bash,
 coreutils, util-linux (`flock`) and
 `patch`. Tests use a marked private `/tmp` sandbox and mock disk commands; they
 never contact a live server or spin a disk up/down. Coverage includes install,
@@ -361,7 +363,8 @@ markers. Regression coverage also includes 40 mocked ATA completion cases,
 updated/invalid patch reinstallation and startup files with early exits. The
 mutation tests deliberately remove the uninstall guard update and bypass ATA
 completion validation, verifying that the suite fails in both cases. GitHub
-Actions runs both test scripts. These tests are not a
+Actions runs all three test scripts, including notification checksum failures
+and empty/malformed checksum output. These tests are not a
 substitute for hardware validation; the revised ATA parsing has not been tested
 on the production server.
 

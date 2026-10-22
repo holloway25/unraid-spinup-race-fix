@@ -459,4 +459,3 @@ licence change does not relicense them.
 
 *Provided with no warranty. It works on my hardware; validate on yours (the README's
 validation section doubles as a test plan). Use at your own risk.*
-

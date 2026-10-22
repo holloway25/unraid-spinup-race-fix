@@ -168,7 +168,8 @@ task-abort and possible read-error symptoms may return.
 
 On the system this was developed on (21-drive array, LSI SAS3224 direct-attach,
 IronWolf/WD/HC550 mix, Unraid 7.3.1; post-upgrade compatibility re-verified on
-7.3.2 and 7.3.3, which ship a byte-identical stock sdspin):
+7.3.2 and 7.3.3, with an additional boot/checksum check on 7.3.4 confirming
+the same recognised stock sdspin; see the version-specific test limits below):
 
 * Race reproduction test (spin-up + concurrent status poll): stock aborted at exactly
   15000 ms; patched waited out a kernel-timestamped **18 s** spin-up and returned
@@ -266,12 +267,30 @@ grep sdspin-patch /var/log/syslog
 | 7.3.1 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Developed and validated on this version (4 Jul 2026) |
 | 7.3.2 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Stock sdspin byte-identical to 7.3.1; patch verified re-applying cleanly after upgrade (9 Jul 2026) |
 | 7.3.3 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Unchanged stock sdspin; boot guard and live patched script verified after upgrade, kernel 6.18.54-Unraid (9 Oct 2026) |
+| 7.3.4 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Existing guard recognised stock and installed revision cd7a123; live/prepared checksums and normal startup notification verified, kernel 6.18.58-Unraid (23 Oct 2026). No new hardware race test. |
 
 The 7.3.3 check confirmed that the boot guard recognised the stock hash before
 installing the patch, the live script matched the saved patched copy, and the
 post-upgrade startup log contained no task-abort or md read-error events at the
 time of review. No forced spin-up/spin-down race reproduction was performed;
 this is a compatibility check, not a new full regression test.
+
+The **7.3.4 check (23 Oct 2026)** confirmed that the unchanged boot guard
+recognised stock before replacement, installed the prepared patch, and left
+the live script byte-identical to the prepared copy (both md5
+`48bf4ed8aa9b567f1566b21c74c97556`). The saved stock retains the checksum
+listed above; no separate extraction of the new OS image was performed.
+The first-array-start notification reported normal status with the verified
+live checksum. No later guard failure/refusal, task-abort, md read/write-error
+or critical-medium-error entries appeared in the short current-boot log
+reviewed. Installed packages were hdparm 9.65-2 and sg3_utils 1.49-2
+(`sg_raw --version`: 0.4.43), matching the package versions documented for
+7.3.3. The kernel changed from 6.18.54 to 6.18.58-Unraid. This confirms
+boot/checksum/notification compatibility, **not** full new-kernel hardware
+validation or an upstream race fix. No disk commands, forced disk-state
+changes, patch reinstallation or hardware race test were performed.
+Unraid 7.3.4 also includes PHP 8.4.27; see the
+[official release notes](https://docs.unraid.net/unraid-os/release-notes/7.3.4/).
 
 Versions listed here have their stock md5 in `known-stock-md5s`, so the installer
 accepts them. Acceptance is based on the **script hash**, not the OS version
@@ -377,9 +396,10 @@ exit 0 on two already-spinning parity drives and exit 2 on a drive already in
 standby. A successful informational CK_COND response had sg_raw exit 21, ATA
 error 0x00, status 0x50 and count 0xff. The live and prepared patched copies both
 had md5 `48bf4ed8aa9b567f1566b21c74c97556`. These checks validate those status
-responses only; boot verification of this revised guard and spin-up/race
-validation remain outstanding. No disk state changes or reboot were performed
-as part of these validation checks.
+responses only. Subsequent boot/checksum/notification verification passed on
+7.3.4 as recorded above; a full spin-up/race test of the revised parser remains
+outstanding. No disk state changes or reboot were performed by these read-only
+validation checks.
 
 The accepted sg_raw exit categories are documented in upstream
 [sg_lib.h](https://github.com/hreinecke/sg3_utils/blob/master/include/sg_lib.h)
@@ -439,3 +459,4 @@ licence change does not relicense them.
 
 *Provided with no warranty. It works on my hardware; validate on yours (the README's
 validation section doubles as a test plan). Use at your own risk.*
+

@@ -168,7 +168,7 @@ task-abort and possible read-error symptoms may return.
 
 On the system this was developed on (21-drive array, LSI SAS3224 direct-attach,
 IronWolf/WD/HC550 mix, Unraid 7.3.1; post-upgrade compatibility re-verified on
-7.3.2 and 7.3.3, with an additional boot/checksum check on 7.3.4 confirming
+7.3.2 and 7.3.3, with additional boot/checksum checks on 7.3.4 and 7.4.0 confirming
 the same recognised stock sdspin; see the version-specific test limits below):
 
 * Race reproduction test (spin-up + concurrent status poll): stock aborted at exactly
@@ -271,6 +271,7 @@ grep sdspin-patch /var/log/syslog
 | 7.3.2 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Stock sdspin byte-identical to 7.3.1; patch verified re-applying cleanly after upgrade (9 Jul 2026) |
 | 7.3.3 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Unchanged stock sdspin; boot guard and live patched script verified after upgrade, kernel 6.18.54-Unraid (9 Oct 2026) |
 | 7.3.4 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Existing guard recognised stock and installed revision cd7a123; live/prepared checksums and normal startup notification verified, kernel 6.18.58-Unraid (23 Oct 2026). No new hardware race test. |
+| 7.4.0 | `23dd1173bb2996d629da2f2c9f2ff3e8` | Existing guard recognised stock; live/prepared checksums and normal first-array-start notification verified, kernel 6.18.60-Unraid (11 Nov 2026). Boot/startup compatibility only; no new hardware race test. |
 
 The 7.3.3 check confirmed that the boot guard recognised the stock hash before
 installing the patch, the live script matched the saved patched copy, and the
@@ -295,12 +296,32 @@ changes, patch reinstallation or hardware race test were performed.
 Unraid 7.3.4 also includes PHP 8.4.27; see the
 [official release notes](https://docs.unraid.net/unraid-os/release-notes/7.3.4/).
 
-Versions listed here have their stock md5 in `known-stock-md5s`, so the installer
+The **7.4.0 check (11 Nov 2026)** confirmed that the existing guard recognised
+stock before replacement. Live and prepared patched scripts were byte-identical,
+both md5 `48bf4ed8aa9b567f1566b21c74c97556`, and the first-array-start
+notification reported normal status with that checksum. hdparm 9.65-2 and
+sg3_utils 1.49-2 (`sg_raw` 0.4.43) remain at the versions checked on 7.3.4.
+The kernel changed from 6.18.58 to 6.18.60-Unraid. No guard refusal, task-abort
+or md/storage-I/O error appeared in the short boot/startup sample reviewed.
+This is boot/checksum/notification compatibility evidence. Full revised-parser
+hardware spin-up/race validation remains outstanding. No disk commands, forced
+spin-state tests or patch reinstallation were performed for this check.
+
+**7.3.5 is expected compatible but untested.** This is an inference from the
+verified 7.3.4 and 7.4.0 installations and the
+[7.3.5 release notes](https://docs.unraid.net/unraid-os/release-notes/7.3.5/),
+which list the same 6.18.60-Unraid kernel as 7.4.0 and no hdparm or sg3_utils
+update. Its stock sdspin has not been independently extracted or checked, and
+no 7.3.5 boot, notification or hardware test was performed. It is therefore
+excluded from the verified table and version labels in `known-stock-md5s`.
+The actual script checksum must match the recognised stock before patching.
+
+Verified versions listed above have their stock md5 in `known-stock-md5s`, so the installer
 accepts them. Acceptance is based on the **script hash**, not the OS version
 number: an unlisted release with identical stock sdspin can also be accepted.
 The boot guard checks against the stock hash saved at installation. If the stock
 script changes, it refuses to patch and the system runs stock — see "After every
-Unraid OS update". A future release such as 7.4 is not presumed compatible: review
+Unraid OS update". Future releases require compatibility review: inspect
 its stock script, adapt and test the diff if needed, and add its recognised hash
 before installing. Adding a checksum alone does not validate an updated script.
 
@@ -408,7 +429,7 @@ standby. A successful informational CK_COND response had sg_raw exit 21, ATA
 error 0x00, status 0x50 and count 0xff. The live and prepared patched copies both
 had md5 `48bf4ed8aa9b567f1566b21c74c97556`. These checks validate those status
 responses only. Subsequent boot/checksum/notification verification passed on
-7.3.4 as recorded above; a full spin-up/race test of the revised parser remains
+7.3.4 and 7.4.0 as recorded above; a full spin-up/race test of the revised parser remains
 outstanding. No disk state changes or reboot were performed by these read-only
 validation checks.
 

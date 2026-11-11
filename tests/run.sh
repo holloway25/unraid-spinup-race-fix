@@ -9,9 +9,35 @@ touch "$ROOT/.sdspin-test-root"
 mkdir -p "$ROOT/usr/local/sbin" "$ROOT/boot/config/custom" "$ROOT/tmp" "$ROOT/bin"
 export SDSPIN_TEST_ROOT="$ROOT"
 export TEST_LOG="$ROOT/log"
+export TMPDIR="$ROOT/tmp"
 export PATH="$ROOT/bin:$PATH"
 REAL_INSTALL=$(command -v install)
-export REAL_INSTALL
+REAL_MD5SUM=$(command -v md5sum)
+REAL_RM=$(command -v rm)
+export REAL_INSTALL REAL_MD5SUM REAL_RM
+cat > "$ROOT/bin/md5sum" <<'MOCK'
+#!/bin/bash
+target=${*: -1}
+if [[ $target == "$SDSPIN_TEST_ROOT/usr/local/sbin/sdspin" || $target == "$SDSPIN_TEST_ROOT/boot/config/custom/sdspin.patched" || $target == "$SDSPIN_TEST_ROOT/boot/config/custom/sdspin.stock" ]]; then
+  case ${CHECKSUM_MODE:-normal} in
+    both-fail) [[ $target == "$SDSPIN_TEST_ROOT/boot/config/custom/sdspin.stock" ]] || exit 1 ;;
+    live-fails) [[ $target != "$SDSPIN_TEST_ROOT/usr/local/sbin/sdspin" ]] || exit 1 ;;
+    patched-fails) [[ $target != "$SDSPIN_TEST_ROOT/boot/config/custom/sdspin.patched" ]] || exit 1 ;;
+    stock-fails) [[ $target != "$SDSPIN_TEST_ROOT/boot/config/custom/sdspin.stock" ]] || exit 1 ;;
+    empty-success) exit 0 ;;
+    malformed-success) echo 'not-a-checksum'; exit 0 ;;
+    output-then-fail) "$REAL_MD5SUM" "$@"; exit 1 ;;
+  esac
+fi
+exec "$REAL_MD5SUM" "$@"
+MOCK
+cat > "$ROOT/bin/rm" <<'MOCK'
+#!/bin/bash
+if [[ ${FAIL_ROLLBACK_REMOVE:-0} == 1 && -e $SDSPIN_TEST_ROOT/failure.used && ${*: -1} == "$SDSPIN_TEST_ROOT/boot/config/custom/sdspin.stock" ]]; then
+  exit 1
+fi
+exec "$REAL_RM" "$@"
+MOCK
 cat > "$ROOT/bin/sg_raw" <<'MOCK'
 #!/bin/bash
 echo 'ERROR: tests must not issue disk commands' >&2
@@ -24,6 +50,9 @@ MOCK
 cat > "$ROOT/bin/install" <<'MOCK'
 #!/bin/bash
 destination=${*: -1}
+if [[ ${FAIL_ROLLBACK_GO:-0} == 1 && -e $SDSPIN_TEST_ROOT/failure.used && $destination == "$SDSPIN_TEST_ROOT/boot/config/.go.replace."* ]]; then
+  exit 1
+fi
 if [[ $destination == "$SDSPIN_TEST_ROOT/usr/local/sbin/sdspin" ]]; then
   echo 'FAIL: non-atomic write to live script' >&2
   exit 99
@@ -148,6 +177,53 @@ bash "$REPO/uninstall.sh" > "$ROOT/output"
 assert_stock
 assert_absent 'guard (unraid' "$ROOT/boot/config/go"
 echo 'PASS: normal uninstall restores verified stock'
+
+for mode in both-fail live-fails patched-fails empty-success malformed-success output-then-fail stock-fails; do
+  reset_files
+  run_install
+  if [[ $mode != stock-fails ]]; then
+    printf '# newer upstream script\n' > "$ROOT/usr/local/sbin/sdspin"
+  fi
+  cp "$ROOT/usr/local/sbin/sdspin" "$ROOT/live.before"
+  cp "$ROOT/boot/config/go" "$ROOT/go.before"
+  CHECKSUM_MODE=$mode expect_fail bash "$REPO/uninstall.sh"
+  cmp "$ROOT/live.before" "$ROOT/usr/local/sbin/sdspin"
+  cmp "$ROOT/go.before" "$ROOT/boot/config/go"
+  grep -q 'cannot verify .* checksum; nothing changed' "$ROOT/output"
+done
+echo 'PASS: uninstall refuses failed, empty and malformed checksums without changing live script or guard (7 cases)'
+
+# A live write fails after go has changed; the subsequent go restoration also fails.
+reset_files
+cp "$ROOT/boot/config/go" "$ROOT/go.before"
+FAIL_INSTALL=1 FAIL_ROLLBACK_GO=1 expect_fail bash "$REPO/install.sh"
+recovery=$(find "$ROOT/tmp" -maxdepth 1 -type d -name 'sdspin-work.*')
+[[ -n $recovery && $recovery != *$'\n'* && $(stat -c %a "$recovery") == 700 ]]
+cmp "$ROOT/go.before" "$recovery/backup.2"
+cmp "$ROOT/fixture" "$recovery/backup.3"
+grep -qF "private recovery directory retained: $recovery" "$ROOT/output"
+grep -qF "Recovery backup: $recovery/backup.2 -> $ROOT/boot/config/go" "$ROOT/output"
+grep -qF "Recovery removal (originally absent): $ROOT/boot/config/custom/sdspin.stock" "$ROOT/output"
+[[ $recovery == "$ROOT/tmp/sdspin-work."* ]]
+rm -rf -- "$recovery"
+echo 'PASS: failed go rollback retains private backups and prints original-to-target recovery mapping'
+
+reset_files
+FAIL_INSTALL=1 FAIL_ROLLBACK_REMOVE=1 expect_fail bash "$REPO/install.sh"
+recovery=$(find "$ROOT/tmp" -maxdepth 1 -type d -name 'sdspin-work.*')
+[[ -n $recovery && $recovery != *$'\n'* ]]
+cmp "$ROOT/fixture" "$recovery/backup.3"
+grep -q 'incomplete rollback' "$ROOT/output"
+[[ $recovery == "$ROOT/tmp/sdspin-work."* ]]
+rm -rf -- "$recovery"
+echo 'PASS: failed rollback removal also retains recovery backups'
+
+reset_files
+FAIL_INSTALL=1 expect_fail bash "$REPO/install.sh"
+[[ -z $(find "$ROOT/tmp" -maxdepth 1 -type d -name 'sdspin-work.*') ]]
+run_install
+[[ -z $(find "$ROOT/tmp" -maxdepth 1 -type d -name 'sdspin-work.*') ]]
+echo 'PASS: completed rollback and successful installation remove temporary recovery copies'
 
 reset_files
 run_install

@@ -13,9 +13,15 @@ if grep -qF '/boot/config/custom/sdspin.patched' "$WORK/go"; then
 fi
 bash -n "$WORK/go"
 RESTORE=0
-if [[ -f $CUSTOM/sdspin.patched && $(hash_file "$SDSPIN") == $(hash_file "$CUSTOM/sdspin.patched") ]]; then
+LIVE_MD5=$(hash_file "$SDSPIN") || die "cannot verify live sdspin checksum; nothing changed"
+if [[ -f $CUSTOM/sdspin.patched ]]; then
+  PATCHED_MD5=$(hash_file "$CUSTOM/sdspin.patched") || die "cannot verify saved patch checksum; nothing changed"
+else
+  PATCHED_MD5=""
+fi
+if [[ -n $PATCHED_MD5 && $LIVE_MD5 == "$PATCHED_MD5" ]]; then
   [[ -f $CUSTOM/sdspin.stock ]] || die "live is patched but stock backup missing; nothing changed"
-  STOCK_MD5=$(hash_file "$CUSTOM/sdspin.stock")
+  STOCK_MD5=$(hash_file "$CUSTOM/sdspin.stock") || die "cannot verify stock backup checksum; nothing changed"
   grep -q "^$STOCK_MD5 " "$HERE/known-stock-md5s" || die "stock backup is not recognised; nothing changed"
   bash -n "$CUSTOM/sdspin.stock"
   RESTORE=1

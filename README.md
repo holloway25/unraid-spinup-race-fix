@@ -210,7 +210,10 @@ bash install.sh
 - It stages and syntax-checks files before installation, uses private temporary
   files and a lock against simultaneous install/uninstall runs, and attempts to
   restore the prior files if an installation write fails. If restoration itself
-  fails (for example, an unwritable filesystem), it prints an explicit error.
+  fails (for example, an unwritable filesystem), it exits with failure and keeps
+  the private temporary recovery directory. The error lists its path, each
+  backup's original target, and targets that were originally absent. Preserve
+  that directory for manual recovery until every target has been checked.
 - Every installation rebuilds the patched script from recognised stock and the
   **current repository diff**, including reinstallation over an older saved patch.
   Invalid updated diffs fail before any installation files are changed.
@@ -373,6 +376,10 @@ the guard. A missing or unrecognised backup while the saved patch is live causes
 a refusal with no changes. Saved stock/patch files are retained, and the optional
 User Scripts notification must be removed separately when retiring the fix.
 
+Checksum commands must succeed and return a valid MD5 before the uninstaller
+compares them. A failed, empty or malformed checksum read aborts before changes
+to the live script or boot guard.
+
 Do not blindly copy an old `sdspin.stock` over a newer live script.
 
 ## Development tests
@@ -385,9 +392,13 @@ never contact a live server or spin a disk up/down. Coverage includes install,
 repeat install, rollback on failed writes, boot-guard verification/failure,
 changed upstream stock, normal uninstall, missing backups and malformed guard
 markers. Regression coverage also includes 40 mocked ATA completion cases,
-updated/invalid patch reinstallation and startup files with early exits. The
-mutation tests deliberately remove the uninstall guard update and bypass ATA
-completion validation, verifying that the suite fails in both cases. GitHub
+updated/invalid patch reinstallation and startup files with early exits. Seven
+uninstall checksum failure cases verify that live files and the guard are
+preserved. Rollback tests cover failed restoration, failed removal, retained
+private backup contents and recovery mappings, and cleanup after success.
+The mutation tests deliberately break the uninstall guard update, ATA completion
+validation, checksum comparison and failed-rollback backup retention, verifying
+that the suite rejects all four mutations. GitHub
 Actions runs all three test scripts, including notification checksum failures
 and empty/malformed checksum output. These tests are not a
 substitute for hardware validation. On 9 Oct 2026, revision `cd7a123` was installed
